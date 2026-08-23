@@ -141,9 +141,15 @@ export default function ScanPage() {
                         "API URL is not configured"
                     );
                 }
+                console.log(JSON.stringify({
+                    deviceKey,
+                    barcode,
+                    timestamp:
+                        new Date().toISOString(),
+                }))
 
                 const response = await fetch(
-                    `${API_URL}/attendanceterminal`,
+                    `${API_URL}`,
                     {
                         method: "POST",
                         headers: {
