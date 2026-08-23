@@ -22,22 +22,35 @@ export default function ScanPage() {
 
     const scannerRef = useRef<Html5Qrcode | null>(null);
 
-    // Promise for the current scanner.start()
-    // This is important because start() is asynchronous.
+    /*
+     * html5-qrcode's start() returns Promise<null>
+     * in some versions, so don't force Promise<void>.
+     *
+     * We only need to await the promise and don't care
+     * about its resolved value.
+     */
     const scannerStartPromiseRef =
-        useRef<Promise<void> | null>(null);
+        useRef<Promise<unknown> | null>(null);
 
-    // Prevent duplicate scans.
+    /*
+     * Prevent duplicate scans.
+     */
     const lastScanRef = useRef("");
     const lastScanTimeRef = useRef(0);
 
-    // Prevent multiple API requests at the same time.
+    /*
+     * Prevent multiple API requests at the same time.
+     */
     const sendingRef = useRef(false);
 
-    // Prevent state updates after unmount.
+    /*
+     * Prevent state updates after unmount.
+     */
     const mountedRef = useRef(false);
 
-    // Used to clean up status timers.
+    /*
+     * Used to clean up status timers.
+     */
     const statusTimeoutRef =
         useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -105,7 +118,9 @@ export default function ScanPage() {
                 return;
             }
 
-            // Don't send another request while one is running.
+            /*
+             * Don't send another request while one is running.
+             */
             if (sendingRef.current) {
                 return;
             }
@@ -121,6 +136,12 @@ export default function ScanPage() {
             }
 
             try {
+                if (!API_URL) {
+                    throw new Error(
+                        "API URL is not configured"
+                    );
+                }
+
                 const response = await fetch(
                     `${API_URL}/attendanceterminal`,
                     {
@@ -144,7 +165,9 @@ export default function ScanPage() {
                 try {
                     data = await response.json();
                 } catch {
-                    // API didn't return JSON.
+                    /*
+                     * API didn't return JSON.
+                     */
                 }
 
                 if (!response.ok) {
@@ -176,6 +199,8 @@ export default function ScanPage() {
                         setMessage(
                             "Position the next student ID inside the scanner"
                         );
+
+                        statusTimeoutRef.current = null;
                     }, 2500);
             } catch (error) {
                 console.error(
@@ -206,6 +231,8 @@ export default function ScanPage() {
                         setMessage(
                             "Position a student ID inside the scanner"
                         );
+
+                        statusTimeoutRef.current = null;
                     }, 3000);
             } finally {
                 sendingRef.current = false;
@@ -270,6 +297,14 @@ export default function ScanPage() {
                             return;
                         }
 
+                        /*
+                         * Don't process another barcode while
+                         * the previous request is running.
+                         */
+                        if (sendingRef.current) {
+                            return;
+                        }
+
                         lastScanRef.current =
                             decodedText;
 
@@ -278,27 +313,56 @@ export default function ScanPage() {
                         await sendBarcode(decodedText);
                     },
                     () => {
-                        // Ignore continuous scanner frame errors.
+                        /*
+                         * Ignore continuous scanner frame errors.
+                         */
                     }
                 );
 
+                /*
+                 * IMPORTANT:
+                 *
+                 * start() may return Promise<null>,
+                 * therefore this ref is Promise<unknown>.
+                 */
                 scannerStartPromiseRef.current =
-                    startPromise
+                    startPromise;
 
                 await startPromise;
 
+                /*
+                 * Component was unmounted while
+                 * scanner.start() was running.
+                 */
                 if (cancelled) {
-                    /*
-                     * Component was unmounted while
-                     * scanner.start() was running.
-                     */
-                    if (scanner.isScanning) {
-                        await scanner.stop();
+                    try {
+                        if (scanner.isScanning) {
+                            await scanner.stop();
+                        }
+                    } catch (error) {
+                        console.error(
+                            "Scanner stop after cancellation failed:",
+                            error
+                        );
                     }
 
-                    await scanner.clear();
+                    try {
+                        await scanner.clear();
+                    } catch (error) {
+                        console.error(
+                            "Scanner clear after cancellation failed:",
+                            error
+                        );
+                    }
 
                     return;
+                }
+
+                if (mountedRef.current) {
+                    setStatus("idle");
+                    setMessage(
+                        "Position a student ID inside the scanner"
+                    );
                 }
             } catch (error) {
                 if (cancelled) {
@@ -318,8 +382,7 @@ export default function ScanPage() {
                     );
                 }
             } finally {
-                scannerStartPromiseRef.current =
-                    null;
+                scannerStartPromiseRef.current = null;
             }
         };
 
@@ -339,8 +402,8 @@ export default function ScanPage() {
             const cleanupScanner = async () => {
                 try {
                     /*
-                     * If scanner.start() is still running,
-                     * wait for it before trying to stop/clear.
+                     * If scanner.start() is still in progress,
+                     * wait for it before stopping/clearing.
                      */
                     if (
                         scannerStartPromiseRef.current
@@ -348,7 +411,9 @@ export default function ScanPage() {
                         try {
                             await scannerStartPromiseRef.current;
                         } catch {
-                            // start() failed; nothing to stop.
+                            /*
+                             * start() failed.
+                             */
                         }
                     }
 
@@ -409,11 +474,15 @@ export default function ScanPage() {
                  * If scanner.start() is still in progress,
                  * wait for it.
                  */
-                if (scannerStartPromiseRef.current) {
+                if (
+                    scannerStartPromiseRef.current
+                ) {
                     try {
                         await scannerStartPromiseRef.current;
                     } catch {
-                        // Scanner failed to start.
+                        /*
+                         * Scanner failed to start.
+                         */
                     }
                 }
 
@@ -845,10 +914,13 @@ export default function ScanPage() {
                     <span>
                         Scanner connected and ready
                     </span>
+
                     <span className="text-border">
                         •
                     </span>
+
                     <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+
                     <span>
                         Device secured
                     </span>
